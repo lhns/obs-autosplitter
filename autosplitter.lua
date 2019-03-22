@@ -31,6 +31,11 @@ function fromSeconds(interval)
     return hours, minutes, seconds
 end
 
+local cancelCheck = function()
+end
+local cancelRestart = function()
+end
+
 function script_update(settings)
     enabled = obs.obs_data_get_bool(settings, "enabled")
     interval = toSeconds(getInterval(settings))
@@ -38,23 +43,20 @@ function script_update(settings)
         interval = 1
     end
 
-    function doRestart()
-        if enabled then
-            recording_restart()
-        end
-    end
+    cancelCheck()
+    cancelRestart()
 
-    check_recording(
-            function()
-                obs.timer_remove(doRestart)
-                if enabled then
-                    obs.timer_add(doRestart, interval * 1000)
+    if enabled then
+        cancelCheck = onRecordingChanged(
+                function(recording)
+                    if recording then
+                        cancelRestart = timer(recording_restart, interval * 1000)
+                    else
+                        cancelRestart()
+                    end
                 end
-            end,
-            function()
-                obs.timer_remove(doRestart)
-            end
-    )
+        )
+    end
 end
 
 function script_defaults(settings)
@@ -99,48 +101,73 @@ function script_properties()
     return props
 end
 
-function runAfter(millis, callback)
+function timer(func, millis)
+    local cancelled = false
+
     obs.timer_add(
             function()
+                if not cancelled then
+                    func()
+                else
+                    obs.remove_current_callback()
+                end
+            end,
+            millis
+    )
+
+    return function()
+        cancelled = true
+    end
+end
+
+function delay(func, millis)
+    return timer(
+            function()
                 obs.remove_current_callback()
-                callback()
+                func()
             end,
             millis
     )
 end
 
-function runWhen(interval, condition, callback)
-    obs.timer_add(
+function delayUntil(func, condition, millis)
+    local cancel
+    cancel = timer(
             function()
                 if condition() then
-                    obs.remove_current_callback()
-                    callback()
+                    cancel()
+                    func()
                 end
             end,
-            interval
+            millis
     )
+
+    return cancel
 end
 
-function runWhile(interval, condition, callback)
-    obs.timer_add(
+function timerWhile(func, condition, millis)
+    local cancel
+    cancel = timer(
             function()
                 if condition() then
-                    callback()
+                    func()
                 else
-                    obs.remove_current_callback()
+                    cancel()
                 end
             end,
-            interval
+            millis
     )
+
+    return cancel
 end
 
-function recording_stopped(callback)
-    runWhen(
-            10,
+function recording_stopped(func)
+    delayUntil(
+            func,
             function()
                 return not obs.obs_frontend_recording_active()
             end,
-            callback
+            10
     )
 end
 
@@ -150,38 +177,30 @@ function recording_restart()
 
         recording_stopped(
                 function()
-                    runWhile(
-                            10,
+                    timerWhile(
+                            function()
+                                obs.obs_frontend_recording_start()
+                            end,
                             function()
                                 return not obs.obs_frontend_recording_active()
                             end,
-                            function()
-                                obs.obs_frontend_recording_start()
-                            end
+                            10
                     )
                 end
         )
     end
 end
 
-function check_recording(onStart, onStop)
-    function check_active()
-        if obs.obs_frontend_recording_active() then
-            obs.remove_current_callback()
-            obs.timer_add(check_inactive, 200)
-            onStart()
-        end
-    end
+function onRecordingChanged(func)
+    local recording = not obs.obs_frontend_recording_active()
 
-    function check_inactive()
-        if not obs.obs_frontend_recording_active() then
-            obs.remove_current_callback()
-            obs.timer_add(check_active, 200)
-            onStop()
-        end
-    end
-
-    obs.timer_remove(check_active)
-    obs.timer_remove(check_inactive)
-    obs.timer_add(check_active, 200)
+    return timer(
+            function()
+                if recording ~= obs.obs_frontend_recording_active() then
+                    recording = not recording
+                    func(recording)
+                end
+            end,
+            200
+    )
 end
