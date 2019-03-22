@@ -1,5 +1,3 @@
-DestinationConfiguration.scala
-
 ### General ###
 *.log
 
@@ -208,3 +206,7 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+
+
+### Python ###
+__pycache__/
