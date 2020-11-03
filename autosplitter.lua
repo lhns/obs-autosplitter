@@ -172,7 +172,7 @@ function recording_stopped(func)
 end
 
 function recording_restart()
-    if obs.obs_frontend_recording_active() then
+    if obs.obs_frontend_recording_active() and not obs.obs_frontend_recording_paused() then
         obs.obs_frontend_recording_stop()
 
         recording_stopped(
